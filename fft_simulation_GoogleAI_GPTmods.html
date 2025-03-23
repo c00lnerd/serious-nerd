@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>FFT Visualizer</title>
+    <style>
+        body {
+            background-color: #222;
+            color: #eee;
+            font-family: sans-serif;
+            text-align: center;
+            margin: 0;
+            padding: 0;
+        }
+        canvas {
+            display: block;
+            margin: 20px auto;
+            background-color: #000;
+            border: 1px solid #444;
+        }
+        #controls, #samplerate, #windowControl {
+            margin-top: 10px;
+        }
+        button, select {
+            margin: 5px;
+            padding: 10px 15px;
+            font-size: 1rem;
+            cursor: pointer;
+        }
+        #waterfallCanvas {
+            height: 200px;
+        }
+        #windowNameDisplay { /* Add style for the window name display */
+            text-align: center;
+            margin: 5px 0;
+            font-size: 1rem;
+            color: #eee;
+        }
+    </style>
+</head>
+<body>
+    <h1>FFT Visualizer</h1>
+    <div id="samplerate">
+        <label for="sampleRateSelect">Sampling Frequency:</label>
+        <select id="sampleRateSelect">
+            <option value="11025">11025 Hz</option>
+            <option value="22050">22050 Hz</option>
+            <option value="44100" selected>44100 Hz</option>
+            <option value="48000">48000 Hz</option>
+            <option value="96000">96000 Hz</option>
+        </select>
+    </div>
+    <div id="windowControl">
+        <label for="windowSelect">Window Function:</label>
+        <select id="windowSelect">
+            <option value="none">None</option>
+            <option value="hamming" selected>Hamming</option>
+            <option value="hann">Hann</option>
+            <option value="blackman">Blackman</option>
+        </select>
+    </div>
+    <button id="startAudio">Start Audio</button></canvas>
+    <canvas id="fftCanvas" width="800" height="400"></canvas>
+    <p id="windowNameDisplay"></p> <canvas id="waterfallCanvas" width="800" height="200">
+    <canvas id="waterfallCanvas" width="800" height="200"></canvas>
+    <div id="controls" style="display:none;">
+        <button id="toggleAmp">Linear Amp Scale</button>
+        <button id="toggleFreq">Linear Freq Scale</button>
+        <button id="toggleFreeze">Freeze</button>
+        <button id="toggleMax">Toggle Max (Current Frame)</button>
+        <button id="toggleMaxHold">Toggle Max Hold</button>
+    </div>
+
+    <script>
+        const fftCanvas = document.getElementById("fftCanvas");
+        const ctx = fftCanvas.getContext("2d");
+        const waterfallCanvas = document.getElementById("waterfallCanvas");
+        const waterfallCtx = waterfallCanvas.getContext("2d");
+
+        const marginLeft = 40;
+        const marginBottom = 30;
+
+        let ampLog = false;
+        let freqLog = false;
+        let freeze = false;
+        let showMax = false;
+        let showMaxHold = false;
+        let maxHold = [];
+        let audioCtx, analyser, bufferLength, dataArray, timeDomainData, windowFunction;
+
+        function frequencyToNoteName(frequency) {
+            const noteNumber = 12 * Math.log2(frequency / 440) + 69;
+            const rounded = Math.round(noteNumber);
+            const noteNames = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+            const noteIndex = ((rounded % 12) + 12) % 12;
+            const octave = Math.floor(rounded / 12) - 1;
+            return noteNames[noteIndex] + octave;
+        }
+
+        document.getElementById("startAudio").addEventListener("click", () => {
+            const selectedRate = parseInt(document.getElementById("sampleRateSelect").value, 10);
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)({
+                sampleRate: selectedRate
+            });
+            if (audioCtx.state === "suspended") {
+                audioCtx.resume();
+            }
+            analyser = audioCtx.createAnalyser();
+            analyser.fftSize = 2048;
+            bufferLength = analyser.frequencyBinCount;
+            dataArray = new Uint8Array(bufferLength);
+            timeDomainData = new Float32Array(analyser.fftSize);
+
+            navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+                .then(stream => {
+                    const source = audioCtx.createMediaStreamSource(stream);
+                    source.connect(analyser);
+                    document.getElementById("startAudio").style.display = "none";
+                    document.getElementById("samplerate").style.display = "none";
+                    document.getElementById("windowControl").style.display = "none";
+                    document.getElementById("controls").style.display = "block";
+                    draw();
+                })
+                .catch(err => {
+                    console.error("Error accessing microphone:", err);
+                });
+        });
+
+        document.getElementById("toggleAmp").addEventListener("click", (e) => {
+            ampLog = !ampLog;
+            e.target.textContent = ampLog ? "Log Amp Scale" : "Linear Amp Scale";
+        });
+
+        document.getElementById("toggleFreq").addEventListener("click", (e) => {
+            freqLog = !freqLog;
+            e.target.textContent = freqLog ? "Log Freq Scale" : "Linear Freq Scale";
+        });
+
+        document.getElementById("toggleFreeze").addEventListener("click", (e) => {
+            freeze = !freeze;
+            e.target.textContent = freeze ? "Unfreeze" : "Freeze";
+        });
+
+        document.getElementById("toggleMax").addEventListener("click", (e) => {
+            showMax = !showMax;
+            e.target.textContent = showMax ? "Hide Max (Current Frame)" : "Toggle Max (Current Frame)";
+        });
+
+        document.getElementById("toggleMaxHold").addEventListener("click", (e) => {
+            showMaxHold = !showMaxHold;
+            e.target.textContent = showMaxHold ? "Hide Max Hold" : "Toggle Max Hold";
+            if (!showMaxHold) {
+                maxHold = [];
+            }
+        });
+
+        function hammingWindow(size) {
+            let window = new Float32Array(size);
+            for (let i = 0; i < size; i++) {
+                window[i] = 0.54 - 0.46 * Math.cos((2 * Math.PI * i) / (size - 1));
+            }
+            return window;
+        }
+        function hannWindow(size){
+            let window = new Float32Array(size);
+            for(let i = 0; i < size; i++){
+                window[i] = 0.5 * (1 - Math.cos((2*Math.PI*i) / (size - 1)));
+            }
+            return window;
+        }
+        function blackmanWindow(size){
+            let window = new Float32Array(size);
+            for(let i = 0; i < size; i++){
+                window[i] = 0.42 - 0.5 * Math.cos((2*Math.PI*i) / (size-1)) + 0.08 * Math.cos((4*Math.PI*i) / (size-1));
+            }
+            return window;
+        }
+        function applyWindow(timeData, windowName){
+            let window;
+            if(windowName === "hamming"){
+                window = hammingWindow(timeData.length);
+            }
+            else if(windowName === "hann"){
+                window = hannWindow(timeData.length);
+            }
+            else if (windowName === "blackman"){
+                window = blackmanWindow(timeData.length);
+            }
+            else{
+                return timeData;
+            }
+            for(let i = 0; i < timeData.length; i++){
+                timeData[i] = timeData[i] * window[i];
+            }
+            return timeData;
+        }
+
+        function amplitudeToColor(amplitude) {
+            const red = amplitude > 128 ? 255 : amplitude * 2;
+            const green = amplitude > 64 ? amplitude > 192 ? 255 : (amplitude - 64) * 2 : 0;
+            const blue = 0;
+            return `rgb(${red}, ${green}, ${blue})`;
+        }
+
+        function draw() {
+            requestAnimationFrame(draw);
+            if (freeze) return;
+
+            if (!analyser) {
+                return;
+            }
+
+            const drawAreaWidth = fftCanvas.width - marginLeft;
+            const drawAreaHeight = fftCanvas.height - marginBottom;
+
+            analyser.getFloatTimeDomainData(timeDomainData);
+            const selectedWindow = document.getElementById("windowSelect").value;
+            const windowedData = applyWindow(timeDomainData, selectedWindow);
+
+            analyser.getByteFrequencyData(dataArray);
+
+            ctx.fillStyle = "#000";
+            ctx.fillRect(0, 0, fftCanvas.width, fftCanvas.height);
+
+            const groupSize = 4;
+            const numGroups = Math.floor(bufferLength / groupSize);
+            const barWidth = drawAreaWidth / numGroups;
+
+            if (maxHold.length !== numGroups) {
+                maxHold = new Array(numGroups).fill(0);
+            }
+
+            let currentFrameMaxValue = 0;
+            let currentFrameMaxIndex = 0;
+            let currentFrameMaxBin = 0;
+
+            for (let i = 0; i < numGroups; i++) {
+                let sum = 0;
+                for (let j = 0; j < groupSize; j++) {
+                    sum += dataArray[i * groupSize + j];
+                }
+                let avg = sum / groupSize;
+                let barHeight = ampLog ? Math.log(avg + 1) * 20 : avg;
+
+                if (avg > maxHold[i]) {
+                    maxHold[i] = avg;
+                }
+
+                if (showMax && avg > currentFrameMaxValue) {
+                    currentFrameMaxValue = avg;
+                    currentFrameMaxIndex = i;
+                    for (let j = 0; j< groupSize; j++){
+                        if(dataArray[i * groupSize + j] > currentFrameMaxValue){
+                            currentFrameMaxValue = dataArray[i * groupSize + j];
+                            currentFrameMaxBin = i*groupSize + j;
+                        }
+                    }
+                }
+
+                let x;
+                if (freqLog) {
+                    const logIndex = Math.log10(i + 1) / Math.log10(numGroups);
+                    x = marginLeft + logIndex * drawAreaWidth;
+                } else {
+                    x = marginLeft + i * barWidth;
+                }
+
+                ctx.fillStyle = "lime";
+                ctx.fillRect(x, fftCanvas.height - marginBottom - barHeight, barWidth, barHeight);
+
+                if (showMaxHold) {
+                let holdHeight = ampLog ? Math.log(maxHold[i] + 1) * 20 : maxHold[i];
+                ctx.fillStyle = "white"; // Change to white color
+                ctx.fillRect(x, fftCanvas.height - marginBottom - holdHeight, barWidth, 2);
+                }
+            }
+
+            if (showMax && currentFrameMaxValue > 0) {
+                let barHeight = ampLog ? Math.log(currentFrameMaxValue + 1) * 20 : currentFrameMaxValue;
+                let x;
+                if (freqLog) {
+                    const logIndex = Math.log10(currentFrameMaxIndex + 1) / Math.log10(numGroups);
+                    x = marginLeft + logIndex * drawAreaWidth;
+                } else {
+                    x = marginLeft + currentFrameMaxIndex * barWidth;
+                }
+                ctx.fillStyle = "red";
+                ctx.fillRect(x, fftCanvas.height - marginBottom - barHeight - 5, barWidth, 5);
+
+                const freqResolution = audioCtx.sampleRate / analyser.fftSize;
+                const frequency = currentFrameMaxBin * freqResolution;
+                const noteName = frequencyToNoteName(frequency);
+
+                ctx.fillStyle = "white";
+                ctx.font = "14px sans-serif";
+                
+                const infoText = `Max: ${Math.round(currentFrameMaxValue)} @ bin ${currentFrameMaxIndex} (${frequency.toFixed(1)} Hz, ${noteName})`;
+                ctx.fillText(infoText, x + 2, fftCanvas.height - marginBottom - barHeight - 10);
+            }
+
+// Get selected window name and update display
+            const windowName = selectedWindow.charAt(0).toUpperCase() + selectedWindow.slice(1);
+            document.getElementById("windowNameDisplay").textContent = "Window: " + windowName;
+
+
+            drawAxes(numGroups, barWidth);
+            updateWaterfall(numGroups, barWidth, groupSize);
+        }
+
+        function drawAxes(numGroups, barWidth) {
+            ctx.strokeStyle = "#555";
+            ctx.lineWidth = 1;
+            ctx.fillStyle = "#eee";
+            ctx.font = "10px sans-serif";
+
+            const drawAreaWidth = fftCanvas.width - marginLeft;
+            const drawAreaHeight = fftCanvas.height - marginBottom;
+            const fMax = audioCtx.sampleRate / 2;
+
+            ctx.beginPath();
+            ctx.moveTo(marginLeft, fftCanvas.height - marginBottom);
+            ctx.lineTo(fftCanvas.width, fftCanvas.height - marginBottom);
+            ctx.stroke();
+
+            ctx.beginPath();
+            ctx.moveTo(marginLeft, 0);
+            ctx.lineTo(marginLeft, fftCanvas.height - marginBottom);
+            ctx.stroke();
+
+            if (!freqLog) {
+                const numTicks = 5;
+                for (let i = 0; i < numTicks; i++) {
+                    const freq = i * fMax / (numTicks - 1);
+                    const x = marginLeft + (freq / fMax) * drawAreaWidth;
+                    ctx.beginPath();
+                    ctx.moveTo(x, fftCanvas.height - marginBottom);
+                    ctx.lineTo(x, fftCanvas.height - marginBottom + 5);
+                    ctx.stroke();
+                    ctx.fillText(Math.round(freq), x - 15, fftCanvas.height - marginBottom + 15);
+                }
+            } else {
+                const tickFreqs = [20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000];
+                const fMin = 20;
+                for (const freq of tickFreqs) {
+                    if (freq < fMin || freq > fMax) continue;
+                    const x = marginLeft + (Math.log10(freq) - Math.log10(fMin)) /
+                        (Math.log10(fMax) - Math.log10(fMin)) * drawAreaWidth;
+                    ctx.beginPath();
+                    ctx.moveTo(x, fftCanvas.height - marginBottom);
+                    ctx.lineTo(x, fftCanvas.height - marginBottom + 5);
+                    ctx.stroke();
+                    ctx.fillText(freq, x - 15, fftCanvas.height - marginBottom + 15);
+                }
+            }
+
+            const yMaxLinear = 255;
+            const yMaxLog = Math.log(256) * 20;
+            const yMax = ampLog ? yMaxLog : yMaxLinear;
+            if (!ampLog) {
+                const ticks = [0, 64, 128, 192, 255];
+                for (const v of ticks) {
+                    const y = fftCanvas.height - marginBottom - (v / yMax) * drawAreaHeight;
+                    ctx.beginPath();
+                    ctx.moveTo(marginLeft - 5, y);
+                    ctx.lineTo(marginLeft, y);
+                    ctx.stroke();
+                    ctx.fillText(v, 2, y + 3);
+                }
+            } else {
+                const step = 20;
+                for (let v = 0; v <= yMax; v += step) {
+                    const y = fftCanvas.height - marginBottom - (v / yMax) * drawAreaHeight;
+                    ctx.beginPath();
+                    ctx.moveTo(marginLeft - 5, y);
+                    ctx.lineTo(marginLeft, y);
+                    ctx.stroke();
+                    ctx.fillText(v.toFixed(0), 2, y + 3);
+                }
+            }
+
+            ctx.font = "12px sans-serif";
+            ctx.fillText("Frequency (Hz)", fftCanvas.width - 120, fftCanvas.height - 5);
+
+            ctx.save();
+            ctx.translate(10, fftCanvas.height / 2);
+            ctx.rotate(-Math.PI / 2);
+            ctx.fillText("Amplitude", 0, 0);
+            ctx.restore();
+        }
+
+        function updateWaterfall(numGroups, barWidth, groupSize) {
+            waterfallCtx.drawImage(waterfallCanvas, 0, -1);
+
+            const drawAreaWidth = waterfallCanvas.width;
+            const groupWidth = drawAreaWidth / numGroups;const newRowHeight = 1;
+
+            for (let i = 0; i < numGroups; i++) {
+                let sum = 0;
+                for (let j = 0; j < groupSize; j++) {
+                    sum += dataArray[i * groupSize + j];
+                }
+                let avg = sum / groupSize;
+                const intensity = Math.round(avg);
+                waterfallCtx.fillStyle = amplitudeToColor(intensity);
+                const x = marginLeft + i * groupWidth;
+                waterfallCtx.fillRect(x, waterfallCanvas.height - newRowHeight, groupWidth, newRowHeight);
+            }
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Game of 24</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            background-color: #f0f2f5;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 2rem auto;
+            padding: 2rem;
+            background-color: white;
+            border-radius: 10px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        h1 {
+            text-align: center;
+            color: #1a73e8;
+            margin-bottom: 2rem;
+        }
+
+        .game-controls {
+            display: flex;
+            justify-content: center;
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+
+        button {
+            padding: 0.5rem 1rem;
+            font-size: 1rem;
+            border: none;
+            border-radius: 5px;
+            background-color: #1a73e8;
+            color: white;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+
+        button:hover {
+            background-color: #1557b0;
+        }
+
+        .numbers-container {
+            margin: 2rem 0;
+            text-align: center;
+        }
+
+        #numbers {
+            display: flex;
+            justify-content: center;
+            gap: 1rem;
+            font-size: 2rem;
+            margin-bottom: 2rem;
+        }
+
+        .input-container {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+
+        input[type="text"] {
+            flex: 1;
+            padding: 0.5rem;
+            font-size: 1rem;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+        }
+
+        #result {
+            text-align: center;
+            margin: 1rem 0;
+            padding: 1rem;
+            border-radius: 5px;
+            font-weight: bold;
+        }
+
+        .success {
+            background-color: #d4edda;
+            color: #155724;
+        }
+
+        .error {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+
+        .instructions {
+            background-color: #f8f9fa;
+            padding: 1rem;
+            border-radius: 5px;
+            margin-top: 2rem;
+        }
+
+        .instructions h3 {
+            margin-bottom: 1rem;
+            color: #1a73e8;
+        }
+
+        .instructions p {
+            margin-bottom: 0.5rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Game of 24</h1>
+        <div class="game-controls">
+            <button id="toggleMode">Mode: Single Digit</button>
+            <button id="newGame">New Game</button>
+        </div>
+        <div class="numbers-container">
+            <div id="numbers"></div>
+        </div>
+        <div class="input-container">
+            <input type="text" id="expression" placeholder="Enter your expression (e.g., 4*3+2*6)">
+            <button id="check">Check Solution</button>
+        </div>
+        <div id="result"></div>
+        <div class="instructions">
+            <h3>How to Play:</h3>
+            <p>Use the four numbers and basic operations (+, -, *, /) to make 24.</p>
+            <p>Each number must be used exactly once.</p>
+            <p>Example: If numbers are 4, 3, 2, 6 then (4 * 3) + (2 * 6) = 24</p>
+        </div>
+    </div>
+
+    <script>
+        class Game24 {
+            constructor() {
+                this.singleDigitMode = true;
+                this.numbers = [];
+                this.setupEventListeners();
+                this.generateNewGame();
+            }
+
+            setupEventListeners() {
+                document.getElementById('toggleMode').addEventListener('click', () => this.toggleMode());
+                document.getElementById('newGame').addEventListener('click', () => this.generateNewGame());
+                document.getElementById('check').addEventListener('click', () => this.checkSolution());
+                document.getElementById('expression').addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter') this.checkSolution();
+                });
+            }
+
+            toggleMode() {
+                this.singleDigitMode = !this.singleDigitMode;
+                document.getElementById('toggleMode').textContent = `Mode: ${this.singleDigitMode ? 'Single' : 'Double'} Digit`;
+                this.generateNewGame();
+            }
+
+            generateNewGame() {
+                let hasValidSolution = false;
+                while (!hasValidSolution) {
+                    this.numbers = [];
+                    for (let i = 0; i < 4; i++) {
+                        const max = this.singleDigitMode ? 9 : 99;
+                        const num = Math.floor(Math.random() * max) + 1;
+                        this.numbers.push(num);
+                    }
+                    hasValidSolution = this.hasSolution(this.numbers);
+                }
+                this.displayNumbers();
+                document.getElementById('expression').value = '';
+                document.getElementById('result').textContent = '';
+                document.getElementById('result').className = '';
+            }
+
+            displayNumbers() {
+                const numbersDiv = document.getElementById('numbers');
+                numbersDiv.innerHTML = this.numbers.map(num => `<span>${num}</span>`).join(' ');
+            }
+
+            evaluateExpression(expr) {
+                try {
+                    // Replace × with * and ÷ with /
+                    expr = expr.replace(/×/g, '*').replace(/÷/g, '/');
+                    
+                    // Basic validation
+                    if (!/^[\d+\-*/()\s.]+$/.test(expr)) {
+                        throw new Error('Invalid characters in expression');
+                    }
+
+                    // Check if all numbers are used
+                    const exprNumbers = expr.match(/\d+/g).map(Number);
+                    const sortedExprNumbers = exprNumbers.sort((a, b) => a - b);
+                    const sortedGameNumbers = [...this.numbers].sort((a, b) => a - b);
+                    
+                    if (JSON.stringify(sortedExprNumbers) !== JSON.stringify(sortedGameNumbers)) {
+                        throw new Error('You must use all four numbers exactly once');
+                    }
+
+                    // Evaluate the expression
+                    const result = Function('"use strict";return (' + expr + ')')();
+                    
+                    if (Math.abs(result - 24) < 0.0001) {
+                        return true;
+                    }
+                    return false;
+                } catch (error) {
+                    console.error('Evaluation error:', error);
+                    return false;
+                }
+            }
+
+            checkSolution() {
+                const expression = document.getElementById('expression').value.trim();
+                const resultDiv = document.getElementById('result');
+
+                if (!expression) {
+                    resultDiv.textContent = 'Please enter an expression';
+                    resultDiv.className = 'error';
+                    return;
+                }
+
+                if (this.evaluateExpression(expression)) {
+                    resultDiv.textContent = 'Correct! The expression equals 24!';
+                    resultDiv.className = 'success';
+                } else {
+                    resultDiv.textContent = 'Incorrect. Try again!';
+                    resultDiv.className = 'error';
+                }
+            }
+
+            hasSolution(numbers) {
+                const operators = ['+', '-', '*', '/'];
+                const nums = [...numbers];
+                
+                // Try all permutations of numbers
+                for (let i = 0; i < 4; i++) {
+                    for (let j = 0; j < 4; j++) {
+                        if (j === i) continue;
+                        for (let k = 0; k < 4; k++) {
+                            if (k === i || k === j) continue;
+                            for (let l = 0; l < 4; l++) {
+                                if (l === i || l === j || l === k) continue;
+                                
+                                // Try all combinations of operators
+                                for (let op1 of operators) {
+                                    for (let op2 of operators) {
+                                        for (let op3 of operators) {
+                                            // Try different groupings
+                                            const expressions = [
+                                                `(${nums[i]}${op1}${nums[j]})${op2}(${nums[k]}${op3}${nums[l]})`,
+                                                `((${nums[i]}${op1}${nums[j]})${op2}${nums[k]})${op3}${nums[l]}`,
+                                                `${nums[i]}${op1}(${nums[j]}${op2}(${nums[k]}${op3}${nums[l]}))`
+                                            ];
+
+                                            for (let expr of expressions) {
+                                                try {
+                                                    const result = Function('"use strict";return (' + expr + ')')();
+                                                    if (Math.abs(result - 24) < 0.0001) {
+                                                        return true;
+                                                    }
+                                                } catch (e) {
+                                                    continue;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                return false;
+            }
+        }
+
+        // Initialize the game when the page loads
+        window.addEventListener('DOMContentLoaded', () => {
+            new Game24();
+        });
+    </script>
+</body>
+</html>
